@@ -88,6 +88,42 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+router.put('/:id', async (req, res) => {
+  try {
+    const { nombre, apellido, correo, contraseña, rol, ciudad, area } = req.body;
 
+    // Buscar si el usuario existe
+    const usuario = await Usuario.findById(req.params.id);
+    if (!usuario) {
+      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+    }
+
+    // Actualizar campos si están presentes en la solicitud
+    if (nombre) usuario.nombre = nombre;
+    if (apellido) usuario.apellido = apellido;
+    if (correo) usuario.correo = correo;
+    if (rol) usuario.rol = rol;
+    if (ciudad) usuario.ciudad = ciudad;
+    if (area) usuario.area = area;
+
+    // Si se incluye una nueva contraseña, hashearla
+    if (contraseña) {
+      const contraseñaHash = await bcrypt.hash(contraseña, 10);
+      usuario.contraseña = contraseñaHash;
+    }
+
+    // Guardar los cambios
+    await usuario.save();
+
+    res.json({ mensaje: 'Usuario actualizado correctamente' });
+  } catch (error) {
+    // Error de correo duplicado u otro problema
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'El correo ya está registrado por otro usuario' });
+    }
+
+    res.status(500).json({ error: 'Error al actualizar usuario', detalle: error.message });
+  }
+});
 
 module.exports = router;
