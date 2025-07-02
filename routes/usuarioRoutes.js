@@ -40,6 +40,7 @@ router.post('/registro', async (req, res) => {
 });
 
 // Login: autenticación
+// Login: autenticación
 router.post('/login', async (req, res) => {
   try {
     const { email, contraseña } = req.body;
@@ -60,8 +61,15 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ msg: 'Contraseña incorrecta' });
     }
 
-    // Si es válido, retorna éxito (puedes agregar token JWT aquí luego)
-    return res.status(200).json({ msg: 'Login exitoso' });
+    // ✅ Enviar datos útiles del usuario (rol, nombre, etc.)
+    return res.status(200).json({
+      msg: 'Login exitoso',
+      usuario: {
+        nombre: usuario.nombre,
+        rol: usuario.rol,
+        correo: usuario.correo,
+      },
+    });
   } catch (error) {
     return res.status(500).json({ msg: 'Error en el servidor', detalle: error.message });
   }
