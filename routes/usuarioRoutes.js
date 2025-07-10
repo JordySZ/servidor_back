@@ -1,137 +1,155 @@
+// backend/routes/usuarioRoutes.js
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const Usuario = require('../models/Usuario');
-const router = express.Router();
+const jwt = require('jsonwebtoken'); // ¡Asegúrate de tener jwt instalado si lo usas! (npm install jsonwebtoken)
 
-// Registro (ya lo tienes)
-router.post('/registro', async (req, res) => {
-  try {
-    const { nombre, apellido, correo, contraseña, rol, ciudad, area } = req.body;
+// Importa el objeto que contiene el esquema y el nombre del modelo
+const UsuarioSchemaInfo = require('../models/Usuario'); // ¡Importa el archivo 'usuarios.js'!
 
-    if (!nombre || !apellido || !correo || !contraseña || !rol || !ciudad || !area) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios' });
-    }
+// Exporta una función que toma la conexión de usuarios como argumento
+module.exports = (connUsers) => {
+    const router = express.Router();
 
-    const contraseñaHash = await bcrypt.hash(contraseña, 10);
+    // Dentro de esta función, crea el modelo Usuario usando la conexión específica (connUsers)
+    const Usuario = connUsers.model(UsuarioSchemaInfo.modelName, UsuarioSchemaInfo.schema);
 
-    const nuevoUsuario = new Usuario({
-      nombre,
-      apellido,
-      correo,
-      contraseña: contraseñaHash,
-      rol,
-      ciudad,
-      area,
+    // Registro
+    router.post('/registro', async (req, res) => {
+        try {
+            const { nombre, apellido, correo, contraseña, rol, ciudad, area } = req.body;
+
+            if (!nombre || !apellido || !correo || !contraseña || !rol || !ciudad || !area) {
+                return res.status(400).json({ error: 'Faltan campos obligatorios' });
+            }
+
+            const contraseñaHash = await bcrypt.hash(contraseña, 10);
+
+            const nuevoUsuario = new Usuario({ // Usa el modelo 'Usuario' que acabamos de definir
+                nombre,
+                apellido,
+                correo,
+                contraseña: contraseñaHash,
+                rol,
+                ciudad,
+                area,
+            });
+
+            await nuevoUsuario.save();
+
+            // Opcional: Generar un token JWT después del registro
+            // const token = jwt.sign(
+            //     { id: nuevoUsuario._id, rol: nuevoUsuario.rol },
+            //     process.env.JWT_SECRET,
+            //     { expiresIn: '1h' }
+            // );
+
+            res.status(201).json({ mensaje: 'Usuario creado exitosamente' /*, token */ });
+        } catch (error) {
+            if (error.code === 11000) {
+                return res.status(409).json({ error: 'El correo ya está registrado' });
+            }
+            res.status(400).json({
+                error: 'Error al crear el usuario',
+                detalle: error.message,
+            });
+        }
     });
 
-    await nuevoUsuario.save();
+    // Login: autenticación
+    router.post('/login', async (req, res) => {
+        try {
+            const { correo, contraseña } = req.body; // Cambié 'email' a 'correo' para que coincida con tu esquema
 
-    res.status(201).json({ mensaje: 'Usuario creado exitosamente' });
-  } catch (error) {
-    if (error.code === 11000) {
-      // Error de clave duplicada (correo repetido)
-      return res.status(409).json({ error: 'El correo ya está registrado' });
-    }
-    res.status(400).json({
-      error: 'Error al crear el usuario',
-      detalle: error.message,
+            if (!correo || !contraseña) {
+                return res.status(400).json({ msg: 'Correo y contraseña son requeridos' });
+            }
+
+            const usuario = await Usuario.findOne({ correo }); // Usa el modelo 'Usuario'
+            if (!usuario) {
+                return res.status(401).json({ msg: 'Usuario no encontrado' });
+            }
+
+            const esValido = await bcrypt.compare(contraseña, usuario.contraseña);
+            if (!esValido) {
+                return res.status(401).json({ msg: 'Contraseña incorrecta' });
+            }
+
+            // Generar token JWT para el login
+            const token = jwt.sign(
+                { id: usuario._id, rol: usuario.rol, nombre: usuario.nombre, correo: usuario.correo },
+                process.env.JWT_SECRET,
+                { expiresIn: '1h' }
+            );
+
+            return res.status(200).json({
+                msg: 'Login exitoso',
+                usuario: {
+                    nombre: usuario.nombre,
+                    rol: usuario.rol,
+                    correo: usuario.correo,
+                },
+                token // Envía el token JWT al cliente
+            });
+        } catch (error) {
+            return res.status(500).json({ msg: 'Error en el servidor', detalle: error.message });
+        }
     });
-  }
-});
 
-// Login: autenticación
-// Login: autenticación
-router.post('/login', async (req, res) => {
-  try {
-    const { email, contraseña } = req.body;
-
-    if (!email || !contraseña) {
-      return res.status(400).json({ msg: 'Email y contraseña son requeridos' });
-    }
-
-    // Buscar usuario por correo
-    const usuario = await Usuario.findOne({ correo: email });
-    if (!usuario) {
-      return res.status(401).json({ msg: 'Usuario no encontrado' });
-    }
-
-    // Comparar contraseñas
-    const esValido = await bcrypt.compare(contraseña, usuario.contraseña);
-    if (!esValido) {
-      return res.status(401).json({ msg: 'Contraseña incorrecta' });
-    }
-
-    // ✅ Enviar datos útiles del usuario (rol, nombre, etc.)
-    return res.status(200).json({
-      msg: 'Login exitoso',
-      usuario: {
-        nombre: usuario.nombre,
-        rol: usuario.rol,
-        correo: usuario.correo,
-      },
+    // Obtener usuarios (sin contraseña)
+    router.get('/', async (req, res) => {
+        try {
+            const usuarios = await Usuario.find({}, '-contraseña'); // Usa el modelo 'Usuario'
+            res.json(usuarios);
+        } catch (error) {
+            res.status(500).json({ error: 'Error al obtener usuarios' });
+        }
     });
-  } catch (error) {
-    return res.status(500).json({ msg: 'Error en el servidor', detalle: error.message });
-  }
-});
 
-// Obtener usuarios (sin contraseña)
-router.get('/', async (req, res) => {
-  try {
-    const usuarios = await Usuario.find({}, '-contraseña');
-    res.json(usuarios);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al obtener usuarios' });
-  }
-});
-router.delete('/:id', async (req, res) => {
-  try {
-    const usuario = await Usuario.findByIdAndDelete(req.params.id);
-    if (!usuario) {
-      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-    }
-    res.json({ mensaje: 'Usuario eliminado correctamente' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al eliminar usuario', detalle: error.message });
-  }
-});
+    // Eliminar usuario
+    router.delete('/:id', async (req, res) => {
+        try {
+            const usuario = await Usuario.findByIdAndDelete(req.params.id); // Usa el modelo 'Usuario'
+            if (!usuario) {
+                return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+            }
+            res.json({ mensaje: 'Usuario eliminado correctamente' });
+        } catch (error) {
+            res.status(500).json({ error: 'Error al eliminar usuario', detalle: error.message });
+        }
+    });
 
-router.put('/:id', async (req, res) => {
-  try {
-    const { nombre, apellido, correo, contraseña, rol, ciudad, area } = req.body;
+    // Actualizar usuario
+    router.put('/:id', async (req, res) => {
+        try {
+            const { nombre, apellido, correo, contraseña, rol, ciudad, area } = req.body;
 
-    // Buscar si el usuario existe
-    const usuario = await Usuario.findById(req.params.id);
-    if (!usuario) {
-      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-    }
+            const usuario = await Usuario.findById(req.params.id); // Usa el modelo 'Usuario'
+            if (!usuario) {
+                return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+            }
 
-    // Actualizar campos si están presentes en la solicitud
-    if (nombre) usuario.nombre = nombre;
-    if (apellido) usuario.apellido = apellido;
-    if (correo) usuario.correo = correo;
-    if (rol) usuario.rol = rol;
-    if (ciudad) usuario.ciudad = ciudad;
-    if (area) usuario.area = area;
+            if (nombre) usuario.nombre = nombre;
+            if (apellido) usuario.apellido = apellido;
+            if (correo) usuario.correo = correo;
+            if (rol) usuario.rol = rol;
+            if (ciudad) usuario.ciudad = ciudad;
+            if (area) usuario.area = area;
 
-    // Si se incluye una nueva contraseña, hashearla
-    if (contraseña) {
-      const contraseñaHash = await bcrypt.hash(contraseña, 10);
-      usuario.contraseña = contraseñaHash;
-    }
+            if (contraseña) {
+                const contraseñaHash = await bcrypt.hash(contraseña, 10);
+                usuario.contraseña = contraseñaHash;
+            }
 
-    // Guardar los cambios
-    await usuario.save();
+            await usuario.save();
 
-    res.json({ mensaje: 'Usuario actualizado correctamente' });
-  } catch (error) {
-    // Error de correo duplicado u otro problema
-    if (error.code === 11000) {
-      return res.status(409).json({ error: 'El correo ya está registrado por otro usuario' });
-    }
+            res.json({ mensaje: 'Usuario actualizado correctamente' });
+        } catch (error) {
+            if (error.code === 11000) {
+                return res.status(409).json({ error: 'El correo ya está registrado por otro usuario' });
+            }
+            res.status(500).json({ error: 'Error al actualizar usuario', detalle: error.message });
+        }
+    });
 
-    res.status(500).json({ error: 'Error al actualizar usuario', detalle: error.message });
-  }
-});
-
-module.exports = router;
+    return router; // Retorna el router configurado
+};
