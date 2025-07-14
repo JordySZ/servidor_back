@@ -92,6 +92,20 @@ const getDynamicListModel = (processName) => {
     return connProcesses.model(modelName, listBaseSchema, modelName); // Usar connProcesses.model
 };
 
+// --- Esquema para las gráficas ---
+const graficaSchema = new mongoose.Schema({
+    tipoGrafica: String,
+    filtro: String,
+    periodo: String,
+}, { timestamps: true });
+
+const getDynamicGraficaModel = (processName) => {
+    const modelName = `${processName}_graficas`;
+    if (connProcesses.models[modelName]) {
+        return connProcesses.model(modelName);
+    }
+    return connProcesses.model(modelName, graficaSchema, modelName);
+};
 
 // --- RUTAS DE GESTIÓN DE PROCESOS (METADATOS y COLECCIONES ASOCIADAS) ---
 
@@ -483,6 +497,58 @@ app.delete('/procesos/:processName/cards/:cardId', async (req, res) => {
     }
 });
 
+// --- RUTAS DE GESTIÓN DE GRÁFICAS ---
+app.use('/procesos/:processName/graficas', (req, res, next) => {
+    const processName = req.params.processName;
+    if (!processName) {
+        return res.status(400).json({ error: "Nombre de proceso no especificado." });
+    }
+    req.GraficaModel = getDynamicGraficaModel(processName);
+    next();
+});
+
+// GET: Obtener todas las gráficas de un proceso
+app.get('/procesos/:processName/graficas', async (req, res) => {
+    try {
+        const graficas = await req.GraficaModel.find({});
+        res.status(200).json(graficas);
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener gráficas." });
+    }
+});
+
+// POST: Crear una nueva gráfica
+app.post('/procesos/:processName/graficas', async (req, res) => {
+    try {
+        const nuevaGrafica = new req.GraficaModel(req.body);
+        await nuevaGrafica.save();
+        res.status(201).json(nuevaGrafica);
+    } catch (error) {
+        res.status(500).json({ error: "Error al crear gráfica." });
+    }
+});
+
+// PUT: Actualizar una gráfica
+app.put('/procesos/:processName/graficas/:graficaId', async (req, res) => {
+    try {
+        const updated = await req.GraficaModel.findByIdAndUpdate(req.params.graficaId, req.body, { new: true });
+        if (!updated) return res.status(404).json({ error: "Gráfica no encontrada." });
+        res.status(200).json(updated);
+    } catch (error) {
+        res.status(500).json({ error: "Error al actualizar gráfica." });
+    }
+});
+
+// DELETE: Eliminar una gráfica
+app.delete('/procesos/:processName/graficas/:graficaId', async (req, res) => {
+    try {
+        const deleted = await req.GraficaModel.findByIdAndDelete(req.params.graficaId);
+        if (!deleted) return res.status(404).json({ error: "Gráfica no encontrada." });
+        res.status(200).json({ mensaje: "Gráfica eliminada exitosamente." });
+    } catch (error) {
+        res.status(500).json({ error: "Error al eliminar gráfica." });
+    }
+});
 
 // --- Inicio del servidor ---
 app.listen(PORT, () => {
