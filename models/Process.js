@@ -1,12 +1,11 @@
-// backend/models/Process.js
 const mongoose = require('mongoose');
 
 const processSchema = new mongoose.Schema({
-  nombre_proceso: {
+nombre_proceso: {
     type: String,
     required: [true, 'El nombre del proceso es obligatorio.'],
-    unique: true, // Asegura que no haya procesos con el mismo nombre
-    trim: true // Elimina espacios en blanco al inicio y final
+    unique: true,
+    trim: true
   },
   fecha_inicio: {
     type: Date,
@@ -16,24 +15,28 @@ const processSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'La fecha de fin es obligatoria.']
   },
-  // Campos adicionales que podrías querer añadir en el futuro
-  
+  // --- NUEVO CAMPO: ESTADO ---
+  estado: {
+    type: String,
+    enum: ['echo', 'en proceso', 'pendiente'], // Define los valores permitidos
+    default: 'pendiente', // Establece 'pendiente' como valor por defecto
+    required: [true, 'El estado del proceso es obligatorio.'] // Aunque tenga default, es buena práctica mantenerlo requerido.
+  },
+  // -------------------------
+
   createdAt: {
     type: Date,
-    default: Date.now // Fecha de creación automática
+    default: Date.now
   },
   updatedAt: {
     type: Date,
-    default: Date.now // Fecha de última actualización (se actualiza en pre-save hook)
+    default: Date.now
   }
 });
 
-// Middleware para actualizar 'updatedAt' antes de cada save
 processSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
 
-// Exporta el modelo, especificando el nombre de la colección real
-// La colección se llamará 'procesos_metadata' en tu base de datos
 module.exports = mongoose.model('Process', processSchema, 'procesos_metadata');

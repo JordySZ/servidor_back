@@ -56,8 +56,6 @@ const cardBaseSchema = new mongoose.Schema({
     titulo: { type: String },
     descripcion: String,
     miembro: String,
-    tarea: String,
-    tiempo: String,
     fechaInicio: Date,
     fechaVencimiento: Date,
     estado: {
@@ -109,35 +107,45 @@ const getDynamicGraficaModel = (processName) => {
 
 // --- RUTAS DE GESTIÓN DE PROCESOS (METADATOS y COLECCIONES ASOCIADAS) ---
 
-// POST: Crear un nuevo proceso con metadatos (nombre, fechaInicio, fechaFin)
+// POST: Crear un nuevo proceso con metadatos (nombre, fechaInicio, fechaFin, estado)
 app.post('/procesos', async (req, res) => {
     try {
-        const { nombre, fechaInicio, fechaFin } = req.body;
-        console.log(`✅ BACKEND DEBUG: Recibida petición POST /procesos con nombre: '${nombre}', fechaInicio: '${fechaInicio}', fechaFin: '${fechaFin}'`);
+        // Incluye 'estado' en la desestructuración del cuerpo de la solicitud
+        const { nombre, fechaInicio, fechaFin, estado } = req.body;
+        console.log(`✅ BACKEND DEBUG: Recibida petición POST /procesos con nombre: '${nombre}', fechaInicio: '${fechaInicio}', fechaFin: '${fechaFin}', estado: '${estado}'`);
 
         if (!nombre || !fechaInicio || !fechaFin) {
             console.log('❌ BACKEND ERROR: Faltan campos requeridos (nombre, fechaInicio, fechaFin).');
             return res.status(400).json({ error: "Faltan los parámetros 'nombre', 'fechaInicio' o 'fechaFin' para el proceso." });
         }
 
+        // Validación adicional para el estado si es necesario
+        const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
+        if (estado && !estadosPermitidos.includes(estado)) {
+            console.log(`❌ BACKEND ERROR: Estado inválido: ${estado}.`);
+            return res.status(400).json({ error: `El estado proporcionado no es válido. Los valores permitidos son: ${estadosPermitidos.join(', ')}.` });
+        }
+
         const newProcessData = {
             nombre_proceso: nombre,
             fecha_inicio: new Date(fechaInicio),
             fecha_fin: new Date(fechaFin),
+            estado: estado || 'pendiente', // Asigna el estado recibido o 'pendiente' por defecto
         };
 
         const newProcessMaster = new ProcessMaster(newProcessData);
         await newProcessMaster.save();
 
-        console.log(`✅ BACKEND DEBUG: Metadatos para el proceso '${nombre}' guardados en 'process_master'.`);
+        console.log(`✅ BACKEND DEBUG: Metadatos para el proceso '${nombre}' guardados en 'process_metadata'.`);
 
-        const nombreColeccionProceso = nombre;
+        const nombreColeccionProceso = nombre; // Esto parece ser el nombre base para las colecciones dinámicas
 
         const responseBody = {
             mensaje: `Proceso '${nombreColeccionProceso}' creado/registrado exitosamente.`,
             nombreColeccion: nombreColeccionProceso,
             proceso: newProcessMaster.toObject()
         };
+        // Asegúrate de que las fechas se formateen como ISO strings para el frontend
         responseBody.proceso.fecha_inicio = newProcessMaster.fecha_inicio.toISOString();
         responseBody.proceso.fecha_fin = newProcessMaster.fecha_fin.toISOString();
 
@@ -158,38 +166,49 @@ app.post('/procesos', async (req, res) => {
     }
 });
 
-// GET: Obtener todos los procesos (con metadatos como fechas)
+// GET: Obtener todos los procesos (con metadatos como fechas y estado)
 app.get('/procesos', async (req, res) => {
     try {
-        console.log('✅ BACKEND DEBUG: Recibida petición GET /procesos para listar procesos desde process_master.');
+        console.log('✅ BACKEND DEBUG: Recibida petición GET /procesos para listar procesos desde process_metadata.');
 
-        const allProcesses = await ProcessMaster.find({}, 'nombre_proceso fecha_inicio fecha_fin').lean();
+        // Incluye 'estado' en la proyección
+        const allProcesses = await ProcessMaster.find({}, 'nombre_proceso fecha_inicio fecha_fin estado').lean();
 
         const formattedProcesses = allProcesses.map(p => ({
             id: p._id.toString(),
             name: p.nombre_proceso,
             startDate: p.fecha_inicio.toISOString(),
-            endDate: p.fecha_fin.toISOString()
+            endDate: p.fecha_fin.toISOString(),
+            estado: p.estado // Incluye el nuevo campo estado
         }));
 
-        console.log(`✅ BACKEND DEBUG: Procesos encontrados en 'process_master': ${formattedProcesses.length}`);
+        console.log(`✅ BACKEND DEBUG: Procesos encontrados en 'process_metadata': ${formattedProcesses.length}`);
         res.status(200).json(formattedProcesses);
     } catch (error) {
-        console.error("❌ BACKEND ERROR: Error al listar procesos desde process_master:", error);
+        console.error("❌ BACKEND ERROR: Error al listar procesos desde process_metadata:", error);
         res.status(500).json({ error: "Error interno del servidor al listar procesos." });
     }
 });
 
-// PUT: Actualizar un proceso (solo sus metadatos en 'process_master')
+// PUT: Actualizar un proceso (solo sus metadatos en 'process_metadata')
 app.put('/procesos/:processName', async (req, res) => {
     const { processName } = req.params;
-    const { nombre, fechaInicio, fechaFin, descripcion } = req.body;
+    // Incluye 'estado' en la desestructuración del cuerpo de la solicitud
+    const { nombre, fechaInicio, fechaFin, descripcion, estado } = req.body;
 
     const updateData = {};
     if (nombre) updateData.nombre_proceso = nombre;
     if (fechaInicio) updateData.fecha_inicio = new Date(fechaInicio);
     if (fechaFin) updateData.fecha_fin = new Date(fechaFin);
     if (descripcion !== undefined) updateData.descripcion = descripcion;
+    if (estado) { // Solo actualiza el estado si se proporciona
+        const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
+        if (!estadosPermitidos.includes(estado)) {
+            console.log(`❌ BACKEND ERROR: Estado inválido para actualización: ${estado}.`);
+            return res.status(400).json({ error: `El estado proporcionado no es válido. Los valores permitidos son: ${estadosPermitidos.join(', ')}.` });
+        }
+        updateData.estado = estado;
+    }
 
     if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No hay campos para actualizar.' });
@@ -207,7 +226,7 @@ app.put('/procesos/:processName', async (req, res) => {
             return res.status(404).json({ error: "Proceso no encontrado para actualizar." });
         }
 
-        console.log(`✅ BACKEND DEBUG: Proceso '${processName}' actualizado en 'process_master'.`, updatedProcess);
+        console.log(`✅ BACKEND DEBUG: Proceso '${processName}' actualizado en 'process_metadata'.`, updatedProcess);
 
         const responseProcess = updatedProcess.toObject();
         responseProcess.fecha_inicio = updatedProcess.fecha_inicio.toISOString();
@@ -245,12 +264,13 @@ app.delete('/procesos/:processName', async (req, res) => {
 
         const db = connProcesses.db;
 
+        // Cambiado de 'process_master' a 'procesos_metadata' que es el nombre de tu colección
         const deletedProcessMaster = await ProcessMaster.findOneAndDelete({ nombre_proceso: processName });
 
         if (!deletedProcessMaster) {
-            console.log(`⚠️ BACKEND DEBUG: Metadatos del proceso '${processName}' no encontrados en 'process_master', intentando eliminar solo colecciones asociadas.`);
+            console.log(`⚠️ BACKEND DEBUG: Metadatos del proceso '${processName}' no encontrados en 'procesos_metadata', intentando eliminar solo colecciones asociadas.`);
         } else {
-            console.log(`✅ BACKEND DEBUG: Metadatos del proceso '${processName}' eliminados de 'process_master'.`);
+            console.log(`✅ BACKEND DEBUG: Metadatos del proceso '${processName}' eliminados de 'procesos_metadata'.`);
         }
 
         const listCollectionName = `${processName}_lists`;
@@ -263,7 +283,12 @@ app.delete('/procesos/:processName', async (req, res) => {
             console.log(`⚠️ BACKEND DEBUG: Colección de listas '${listCollectionName}' no encontrada, saltando eliminación.`);
         }
 
-        const cardCollectionName = processName;
+        // Confirmar el nombre exacto de la colección de tarjetas si es diferente.
+        // Si las tarjetas están en la misma colección que las listas o si no hay una colección separada por proceso:
+        // Asegúrate de que esta lógica coincida con cómo guardas las tarjetas.
+        // Si el nombre de la colección de tarjetas es solo el nombre del proceso, entonces 'processName' está bien aquí.
+        // Si las tarjetas se guardan en la colección `${processName}_cards`, entonces la línea de abajo está bien.
+        const cardCollectionName = `${processName}`; // Ajustado para ser más explícito
         const cardCollectionExists = await db.listCollections({ name: cardCollectionName }).hasNext();
 
         if (cardCollectionExists) {
@@ -549,7 +574,39 @@ app.delete('/procesos/:processName/graficas/:graficaId', async (req, res) => {
         res.status(500).json({ error: "Error al eliminar gráfica." });
     }
 });
+// GET: Obtener los detalles de un proceso específico por su nombre
+app.get('/procesos/:processName', async (req, res) => {
+    try {
+        const processName = req.params.processName;
+        console.log(`✅ BACKEND DEBUG: Recibida petición GET /procesos/${processName} para obtener detalles del proceso.`);
 
+        // Busca el proceso en la colección 'process_metadata' por el campo 'nombre_proceso'
+        const processDetails = await ProcessMaster.findOne({ nombre_proceso: processName }).lean();
+
+        if (!processDetails) {
+            console.log(`❌ BACKEND DEBUG: Proceso con nombre '${processName}' no encontrado.`);
+            return res.status(404).json({ message: 'Proceso no encontrado.' });
+        }
+
+        // Formatea la respuesta para que coincida con el modelo 'Process' de Flutter
+        // Asegúrate de que los nombres de las claves aquí coincidan con lo que tu Process.fromJson espera
+        const formattedProcess = {
+            id: processDetails._id.toString(),
+            name: processDetails.nombre_proceso,
+            startDate: processDetails.fecha_inicio.toISOString(), // Formato ISO 8601
+            endDate: processDetails.fecha_fin.toISOString(),     // Formato ISO 8601
+            estado: processDetails.estado,
+            // Agrega cualquier otro campo que tu modelo Process de Flutter espere
+        };
+
+        console.log(`✅ BACKEND DEBUG: Detalles del proceso '${processName}' encontrados y formateados.`);
+        res.status(200).json(formattedProcess);
+
+    } catch (error) {
+        console.error(`❌ BACKEND ERROR: Error al obtener el proceso '${req.params.processName}':`, error);
+        res.status(500).json({ message: 'Error interno del servidor al obtener el proceso.', error: error.message });
+    }
+});
 // --- Inicio del servidor ---
 app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
