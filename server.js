@@ -193,15 +193,17 @@ app.get('/procesos', async (req, res) => {
 // PUT: Actualizar un proceso (solo sus metadatos en 'process_metadata')
 app.put('/procesos/:processName', async (req, res) => {
     const { processName } = req.params;
-    // Incluye 'estado' en la desestructuración del cuerpo de la solicitud
     const { nombre, fechaInicio, fechaFin, descripcion, estado } = req.body;
 
     const updateData = {};
     if (nombre) updateData.nombre_proceso = nombre;
-    if (fechaInicio) updateData.fecha_inicio = new Date(fechaInicio);
-    if (fechaFin) updateData.fecha_fin = new Date(fechaFin);
+    
+    // CAMBIO CLAVE AQUÍ: Asignar directamente la cadena ISO si existe
+    if (fechaInicio) updateData.fecha_inicio = fechaInicio; 
+    if (fechaFin) updateData.fecha_fin = fechaFin; 
+
     if (descripcion !== undefined) updateData.descripcion = descripcion;
-    if (estado) { // Solo actualiza el estado si se proporciona
+    if (estado) {
         const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
         if (!estadosPermitidos.includes(estado)) {
             console.log(`❌ BACKEND ERROR: Estado inválido para actualización: ${estado}.`);
@@ -215,6 +217,9 @@ app.put('/procesos/:processName', async (req, res) => {
     }
 
     try {
+        // Aquí podrías agregar un console.log para ver qué `updateData` se envía a Mongoose
+        console.log('✅ BACKEND DEBUG: Datos que se envían a Mongoose para actualizar:', updateData);
+
         const updatedProcess = await ProcessMaster.findOneAndUpdate(
             { nombre_proceso: processName },
             { $set: updateData },
@@ -229,6 +234,7 @@ app.put('/procesos/:processName', async (req, res) => {
         console.log(`✅ BACKEND DEBUG: Proceso '${processName}' actualizado en 'process_metadata'.`, updatedProcess);
 
         const responseProcess = updatedProcess.toObject();
+        // Aseguramos que las fechas se devuelvan como cadenas ISO desde el objeto actualizado
         responseProcess.fecha_inicio = updatedProcess.fecha_inicio.toISOString();
         responseProcess.fecha_fin = updatedProcess.fecha_fin.toISOString();
 
