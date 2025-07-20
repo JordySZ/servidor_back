@@ -562,9 +562,13 @@ app.post('/procesos/:processName/graficas', async (req, res) => {
 // PUT: Actualizar una gráfica
 app.put('/procesos/:processName/graficas/:graficaId', async (req, res) => {
     try {
-        const updated = await req.GraficaModel.findByIdAndUpdate(req.params.graficaId, req.body, { new: true });
+        const updated = await req.GraficaModel.findByIdAndUpdate(
+            req.params.graficaId,
+            req.body,
+            { new: true, runValidators: true }
+        );
         if (!updated) return res.status(404).json({ error: "Gráfica no encontrada." });
-        res.status(200).json(updated);
+        res.status(200).json(updated.toObject ? updated.toObject() : updated);
     } catch (error) {
         res.status(500).json({ error: "Error al actualizar gráfica." });
     }
