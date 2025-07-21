@@ -528,6 +528,62 @@ app.delete('/procesos/:processName/cards/:cardId', async (req, res) => {
     }
 });
 
+// CRUD home_screen
+const router = express.Router();
+
+// Esquema de tarjeta
+const cardSchema = new mongoose.Schema({
+  titulo: String,
+  idLista: String,
+  estado: String,
+  miembro: String,
+  fecha: Date
+});
+const Card = mongoose.model('Card', cardSchema);
+
+// Obtener todas las tarjetas por proceso
+router.get('/procesos/:processName/cards', async (req, res) => {
+  try {
+    const cards = await Card.find({});
+    res.json(cards);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener tarjetas' });
+  }
+});
+
+// Crear una nueva tarjeta
+router.post('/procesos/:processName/cards', async (req, res) => {
+  try {
+    const nueva = new Card(req.body);
+    await nueva.save();
+    res.status(201).json(nueva);
+  } catch (err) {
+    res.status(400).json({ error: 'Error al crear tarjeta' });
+  }
+});
+
+// Actualizar una tarjeta
+router.put('/procesos/:processName/cards/:id', async (req, res) => {
+  try {
+    const actualizada = await Card.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(actualizada);
+  } catch (err) {
+    res.status(400).json({ error: 'Error al actualizar tarjeta' });
+  }
+});
+
+// Eliminar una tarjeta
+router.delete('/procesos/:processName/cards/:id', async (req, res) => {
+  try {
+    await Card.findByIdAndDelete(req.params.id);
+    res.json({ mensaje: 'Tarjeta eliminada' });
+  } catch (err) {
+    res.status(400).json({ error: 'Error al eliminar tarjeta' });
+  }
+});
+
+module.exports = router;
+
 // --- RUTAS DE GESTIÓN DE GRÁFICAS ---
 app.use('/procesos/:processName/graficas', (req, res, next) => {
     const processName = req.params.processName;
