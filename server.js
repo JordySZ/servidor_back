@@ -68,14 +68,13 @@ const cardBaseSchema = new mongoose.Schema({
 }, { strict: false, timestamps: true });
 
 // Función auxiliar para obtener o crear un modelo de Mongoose dinámicamente para Tarjetas
-const getDynamicCardModel = (collectionName) => {
-    const modelName = collectionName;
-    if (connProcesses.models[modelName]) { // Usar connProcesses.models
+const getDynamicCardModel = (processName) => {
+    const modelName = `${processName}_cards`; // Asegúrate de usar este patrón
+    if (connProcesses.models[modelName]) {
         return connProcesses.model(modelName);
     }
-    return connProcesses.model(modelName, cardBaseSchema, modelName); // Usar connProcesses.model
+    return connProcesses.model(modelName, cardBaseSchema, modelName);
 };
-
 // --- Esquema para las Listas (columnas del tablero) ---
 const listBaseSchema = new mongoose.Schema({
     titulo: { type: String, required: true },
@@ -191,71 +190,130 @@ app.get('/procesos', async (req, res) => {
 });
 
 // PUT: Actualizar un proceso (solo sus metadatos en 'process_metadata')
-app.put('/procesos/:processName', async (req, res) => {
-    const { processName } = req.params;
-    const { nombre, fechaInicio, fechaFin, descripcion, estado } = req.body;
+app.put('/procesos/:oldName', async (req, res) => {
+  const { oldName } = req.params;
+  const { nombre: newName, fechaInicio, fechaFin, estado } = req.body;
+  
+  // Verificar estado de la conexión
+  if (connProcesses.readyState !== 1) {
+    return res.status(503).json({
+      message: 'La base de datos no está conectada',
+      readyState: connProcesses.readyState,
+      dbStatus: {
+        0: 'disconnected',
+        1: 'connected',
+        2: 'connecting',
+        3: 'disconnecting'
+      }
+    });
+  }
 
-    const updateData = {};
-    if (nombre) updateData.nombre_proceso = nombre;
-    
-    // CAMBIO CLAVE AQUÍ: Asignar directamente la cadena ISO si existe
-    if (fechaInicio) updateData.fecha_inicio = fechaInicio; 
-    if (fechaFin) updateData.fecha_fin = fechaFin; 
+  let session;
+  try {
+    // Iniciar sesión con la conexión correcta y timeout extendido
+    session = await connProcesses.startSession();
+    await session.withTransaction(async () => {
+      // Validaciones básicas
+      if (!newName && !fechaInicio && !fechaFin && !estado) {
+        throw new Error('No hay campos para actualizar.');
+      }
 
-    if (descripcion !== undefined) updateData.descripcion = descripcion;
-    if (estado) {
-        const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
-        if (!estadosPermitidos.includes(estado)) {
-            console.log(`❌ BACKEND ERROR: Estado inválido para actualización: ${estado}.`);
-            return res.status(400).json({ error: `El estado proporcionado no es válido. Los valores permitidos son: ${estadosPermitidos.join(', ')}.` });
+      // Validar nuevo nombre si se está cambiando
+      if (newName && newName !== oldName) {
+        const existingProcess = await ProcessMaster.findOne({ nombre_proceso: newName }).session(session);
+        if (existingProcess) {
+          throw new Error('Ya existe un proceso con este nombre.');
         }
-        updateData.estado = estado;
-    }
+      }
 
-    if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ message: 'No hay campos para actualizar.' });
-    }
+      const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
+      if (estado && !estadosPermitidos.includes(estado)) {
+        throw new Error(`Estado inválido. Valores permitidos: ${estadosPermitidos.join(', ')}`);
+      }
 
-    try {
-        // Aquí podrías agregar un console.log para ver qué `updateData` se envía a Mongoose
-        console.log('✅ BACKEND DEBUG: Datos que se envían a Mongoose para actualizar:', updateData);
+      // Preparar datos de actualización
+      const updateData = { updatedAt: Date.now() };
+      if (newName) updateData.nombre_proceso = newName;
+      if (fechaInicio) updateData.fecha_inicio = new Date(fechaInicio);
+      if (fechaFin) updateData.fecha_fin = new Date(fechaFin);
+      if (estado) updateData.estado = estado;
 
-        const updatedProcess = await ProcessMaster.findOneAndUpdate(
-            { nombre_proceso: processName },
-            { $set: updateData },
-            { new: true, runValidators: true }
+      // Actualizar metadatos
+      const updatedProcess = await ProcessMaster.findOneAndUpdate(
+        { nombre_proceso: oldName },
+        { $set: updateData },
+        { new: true, runValidators: true, session }
+      );
+
+      if (!updatedProcess) {
+        throw new Error('Proceso no encontrado.');
+      }
+
+      // Renombrar colecciones si el nombre cambió
+      if (newName && newName !== oldName) {
+        const renameResults = await ProcessMaster.schema.statics.renameAssociatedCollections(
+          oldName,
+          newName,
+          connProcesses.db
         );
-
-        if (!updatedProcess) {
-            console.log(`❌ BACKEND DEBUG: Proceso con nombre '${processName}' no encontrado para actualizar.`);
-            return res.status(404).json({ error: "Proceso no encontrado para actualizar." });
+        
+        const failedRenames = renameResults.filter(r => !r.success);
+        if (failedRenames.length > 0) {
+          console.error('Algunas colecciones no se renombraron:', failedRenames);
+          // Continuamos pero podrías lanzar un error si es crítico
         }
+      }
 
-        console.log(`✅ BACKEND DEBUG: Proceso '${processName}' actualizado en 'process_metadata'.`, updatedProcess);
+      const responseProcess = updatedProcess.toObject();
+      responseProcess.fecha_inicio = updatedProcess.fecha_inicio.toISOString();
+      responseProcess.fecha_fin = updatedProcess.fecha_fin.toISOString();
 
-        const responseProcess = updatedProcess.toObject();
-        // Aseguramos que las fechas se devuelvan como cadenas ISO desde el objeto actualizado
-        responseProcess.fecha_inicio = updatedProcess.fecha_inicio.toISOString();
-        responseProcess.fecha_fin = updatedProcess.fecha_fin.toISOString();
-
-        res.status(200).json({
-            message: 'Proceso actualizado exitosamente.',
-            proceso: responseProcess
-        });
-
-    } catch (error) {
-        console.error("❌ BACKEND ERROR: Error al actualizar proceso:", error);
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(val => val.message);
-            return res.status(400).json({ error: messages.join(', ') });
-        }
-        if (error.code === 11000) {
-            return res.status(409).json({ message: `Ya existe un proceso con el nombre '${nombre}'.` });
-        }
-        res.status(500).json({ error: "Error interno del servidor al actualizar el proceso." });
+      res.status(200).json({
+        message: 'Proceso actualizado exitosamente',
+        proceso: responseProcess
+      });
+    }, {
+      maxCommitTimeMS: 30000,
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' }
+    });
+  } catch (err) {
+    console.error('Error en PUT /procesos:', err);
+    
+    // Manejo específico de errores
+    if (err.message.includes('No hay campos para actualizar')) {
+      return res.status(400).json({ message: err.message });
     }
+    if (err.message.includes('Ya existe un proceso con este nombre')) {
+      return res.status(409).json({ message: err.message });
+    }
+    if (err.message.includes('Estado inválido')) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err.message.includes('Proceso no encontrado')) {
+      return res.status(404).json({ message: err.message });
+    }
+    if (err.name === 'MongoNetworkError') {
+      return res.status(503).json({ 
+        message: 'Error de conexión con la base de datos',
+        suggestion: 'Verifica tu conexión a internet y reintenta' 
+      });
+    }
+    if (err.name === 'ValidationError') {
+      const errors = Object.values(err.errors).map(el => el.message);
+      return res.status(400).json({ message: errors.join(', ') });
+    }
+    
+    res.status(500).json({ 
+      message: 'Error interno al actualizar el proceso',
+      error: err.message 
+    });
+  } finally {
+    if (session) {
+      await session.endSession().catch(console.error);
+    }
+  }
 });
-
 
 // DELETE: Eliminar un proceso (metadatos y sus colecciones asociadas)
 app.delete('/procesos/:processName', async (req, res) => {
@@ -294,7 +352,7 @@ app.delete('/procesos/:processName', async (req, res) => {
         // Asegúrate de que esta lógica coincida con cómo guardas las tarjetas.
         // Si el nombre de la colección de tarjetas es solo el nombre del proceso, entonces 'processName' está bien aquí.
         // Si las tarjetas se guardan en la colección `${processName}_cards`, entonces la línea de abajo está bien.
-        const cardCollectionName = `${processName}`; // Ajustado para ser más explícito
+        const cardCollectionName = `${processName}_cards`; // Ajustado para ser más explícito
         const cardCollectionExists = await db.listCollections({ name: cardCollectionName }).hasNext();
 
         if (cardCollectionExists) {

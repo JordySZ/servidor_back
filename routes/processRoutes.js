@@ -102,7 +102,7 @@ router.delete('/procesos/:processName', async (req, res) => {
     // 2. Eliminar la colección de listas y tarjetas asociada a este proceso
     const db = mongoose.connection.db; // Accede a la base de datos nativa de MongoDB
     const listsCollectionName = `${processName}_lists`;
-    const cardsCollectionName = `${processName}`; // Si tienes una colección de tarjetas separada por proceso
+    const cardsCollectionName = `${processName}_cards`; // Si tienes una colección de tarjetas separada por proceso
 
     // Intenta eliminar la colección de listas
     const listDropResult = await db.collection(listsCollectionName).drop()
@@ -139,53 +139,81 @@ router.delete('/procesos/:processName', async (req, res) => {
 
 // --- ENDPOINT: ACTUALIZAR UN PROCESO (INCLUYENDO EL ESTADO) ---
 // PUT /api/procesos/:processName
-router.put('/procesos/:processName', async (req, res) => {
-  const { processName } = req.params;
-  // Ahora también esperamos el campo 'estado' para actualizar
-  const { nombre, fechaInicio, fechaFin, descripcion, estado } = req.body;
-
-  if (!nombre && !fechaInicio && !fechaFin && !descripcion && !estado) {
-    return res.status(400).json({ message: 'No hay campos para actualizar.' });
-  }
-
-  // Opcional: Validar el 'estado' si se proporciona
-  const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
-  if (estado && !estadosPermitidos.includes(estado)) {
-    return res.status(400).json({ message: `El estado proporcionado no es válido. Los valores permitidos son: ${estadosPermitidos.join(', ')}.` });
-  }
-
+// PUT /api/procesos/:processName
+router.put('/procesos/:oldName', async (req, res) => {
+  const { oldName } = req.params;
+  const { nombre: newName, fechaInicio, fechaFin, estado } = req.body;
+  const session = await mongoose.startSession();
+  
   try {
-    const updateData = {};
-    if (nombre) updateData.nombre_proceso = nombre;
+    session.startTransaction();
+
+    // 1. Validaciones
+    if (!newName && !fechaInicio && !fechaFin && !estado) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'No hay campos para actualizar.' });
+    }
+
+    const estadosPermitidos = ['echo', 'en proceso', 'pendiente'];
+    if (estado && !estadosPermitidos.includes(estado)) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        message: `Estado inválido. Valores permitidos: ${estadosPermitidos.join(', ')}` 
+      });
+    }
+
+    // 2. Preparar datos de actualización
+    const updateData = { updatedAt: Date.now() };
+    if (newName) updateData.nombre_proceso = newName;
     if (fechaInicio) updateData.fecha_inicio = new Date(fechaInicio);
     if (fechaFin) updateData.fecha_fin = new Date(fechaFin);
-    if (descripcion) updateData.descripcion = descripcion;
-    if (estado) updateData.estado = estado; // Agrega el campo estado a la data de actualización
+    if (estado) updateData.estado = estado;
 
+    // 3. Actualizar metadatos
     const updatedProcess = await Process.findOneAndUpdate(
-      { nombre_proceso: processName },
+      { nombre_proceso: oldName },
       { $set: updateData },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true, session }
     );
 
     if (!updatedProcess) {
-      return res.status(404).json({ message: 'Proceso no encontrado para actualizar.' });
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Proceso no encontrado.' });
     }
 
-    console.log(`[BACKEND] Proceso '${processName}' actualizado.`);
+    // 4. Renombrar colecciones si el nombre cambió
+    if (newName && newName !== oldName) {
+      const renameResults = await Process.renameProcessCollections(
+        oldName,
+        newName,
+        mongoose.connection.db
+      );
+      
+      console.log('Resultados del renombrado:', renameResults);
+    }
+
+    await session.commitTransaction();
+    
     res.status(200).json({
-      message: 'Proceso actualizado exitosamente.',
+      message: 'Proceso actualizado exitosamente',
       proceso: updatedProcess
     });
 
   } catch (err) {
+    await session.abortTransaction();
     console.error('[BACKEND ERROR] Error al actualizar proceso:', err);
+    
     if (err.name === 'ValidationError') {
       const errors = Object.values(err.errors).map(el => el.message);
       return res.status(400).json({ message: errors.join(', ') });
     }
-    res.status(500).json({ message: 'Error interno del servidor al actualizar el proceso.' });
+    
+    res.status(500).json({ 
+      message: 'Error interno al actualizar el proceso.',
+      error: err.message 
+    });
+  } finally {
+    session.endSession();
   }
 });
-
 module.exports = router;
