@@ -2,16 +2,24 @@ const express = require('express');
 const router = express.Router();
 const Card = require('../models/Tarjeta');
 
+// Lista de miembros permitidos (debe coincidir con el enum del modelo)
+const MIEMBROS_PERMITIDOS = ['DSI', 'Infraestructura', 'Contabilidad', 'Operaciones', 'Redes', 'Trade', 'DragonTaill'];
+
 // Helper function to ensure date strings are treated as UTC
 const ensureUtcDate = (dateString) => {
     if (!dateString) return null;
-    // Check if the string already explicitly indicates UTC (Z or +00:00)
     if (dateString.endsWith('Z') || dateString.includes('+00:00')) {
         return new Date(dateString);
     }
-    // If not, assume it's meant to be UTC and append 'Z'
-    // This is a safeguard if Flutter's .toUtc().toIso8601String() somehow loses the 'Z'
     return new Date(`${dateString}Z`);
+};
+
+// Validar el campo miembro
+const validarMiembro = (miembro) => {
+    if (miembro && !MIEMBROS_PERMITIDOS.includes(miembro)) {
+        throw new Error(`El miembro debe ser uno de los siguientes: ${MIEMBROS_PERMITIDOS.join(', ')}`);
+    }
+    return true;
 };
 
 // GET: Obtener todas las tarjetas
@@ -51,37 +59,40 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ message: 'ID y título de la tarjeta son requeridos.' });
     }
 
-    // --- DEBUGGING LOGS ---
-    console.log('\n--- NODE.JS DEBUG: POST Request Received ---');
-    console.log('Request Body COMPLETO:', req.body);
-    console.log('Fecha de Vencimiento STRING RECIBIDA (del frontend):', req.body.fechaVencimiento);
-    console.log('Fecha de Inicio STRING RECIBIDA (del frontend):', req.body.fechaInicio);
-    // --- END DEBUGGING LOGS ---
-
-    const newCard = new Card({
-        id: req.body.id,
-        titulo: req.body.titulo,
-        miembro: req.body.miembro || '',
-      
-        // Usar la función auxiliar para asegurar que las fechas se traten como UTC
-        fechaInicio: ensureUtcDate(req.body.fechaInicio),
-        fechaVencimiento: ensureUtcDate(req.body.fechaVencimiento),
-        estado: req.body.estado || 'porHacer',
-    });
-
-    // --- DEBUGGING LOGS ---
-    console.log('Fecha de Vencimiento PARSEADA (objeto Date):', newCard.fechaVencimiento?.toString());
-    console.log('Fecha de Vencimiento PARSEADA (toISOString - DEBE SER UTC):', newCard.fechaVencimiento?.toISOString());
-    console.log('Fecha de Inicio PARSEADA (toISOString - DEBE SER UTC):', newCard.fechaInicio?.toISOString());
-    // --- END DEBUGGING LOGS ---
-
     try {
+        // Validar el campo miembro si está presente
+        if (req.body.miembro) {
+            validarMiembro(req.body.miembro);
+        }
+
+        // --- DEBUGGING LOGS ---
+        console.log('\n--- NODE.JS DEBUG: POST Request Received ---');
+        console.log('Request Body COMPLETO:', req.body);
+        console.log('Fecha de Vencimiento STRING RECIBIDA:', req.body.fechaVencimiento);
+        console.log('Fecha de Inicio STRING RECIBIDA:', req.body.fechaInicio);
+        // --- END DEBUGGING LOGS ---
+
+        const newCard = new Card({
+            id: req.body.id,
+            titulo: req.body.titulo,
+            miembro: req.body.miembro || '',
+            fechaInicio: ensureUtcDate(req.body.fechaInicio),
+            fechaVencimiento: ensureUtcDate(req.body.fechaVencimiento),
+            estado: req.body.estado || 'porHacer',
+        });
+
         const savedCard = await newCard.save();
-        console.log('Tarjeta creada exitosamente. Objeto retornado por Mongoose (Fechas en UTC):', savedCard);
+        console.log('Tarjeta creada exitosamente:', savedCard);
         res.status(201).json(savedCard);
     } catch (err) {
         console.error("Error al crear tarjeta:", err);
-        res.status(400).json({ message: 'Error al crear tarjeta', error: err.message });
+        res.status(400).json({ 
+            message: 'Error al crear tarjeta', 
+            error: err.message,
+            ...(err.message.includes('El miembro debe ser') && { 
+                miembrosPermitidos: MIEMBROS_PERMITIDOS 
+            })
+        });
     }
 });
 
@@ -91,21 +102,24 @@ router.put('/:id', async (req, res) => {
         const { id } = req.params;
         const updates = { ...req.body };
 
+        // Validar el campo miembro si está presente en la actualización
+        if (updates.miembro !== undefined) {
+            validarMiembro(updates.miembro);
+        }
+
         // --- DEBUGGING LOGS ---
         console.log('\n--- NODE.JS DEBUG: PUT Request Received ---');
         console.log('Request Body COMPLETO:', req.body);
-        console.log('Fecha de Vencimiento STRING RECIBIDA (del frontend - PUT):', req.body.fechaVencimiento);
-        console.log('Fecha de Inicio STRING RECIBIDA (del frontend - PUT):', req.body.fechaInicio);
+        console.log('Fecha de Vencimiento STRING RECIBIDA (PUT):', req.body.fechaVencimiento);
+        console.log('Fecha de Inicio STRING RECIBIDA (PUT):', req.body.fechaInicio);
         // --- END DEBUGGING LOGS ---
 
-        // Aplicar la conversión segura a UTC para las fechas si existen en el body
+        // Aplicar la conversión segura a UTC para las fechas
         if (updates.fechaInicio !== undefined) {
             updates.fechaInicio = ensureUtcDate(updates.fechaInicio);
-            console.log('Fecha de Inicio PARSEADA (toISOString - PUT):', updates.fechaInicio?.toISOString());
         }
         if (updates.fechaVencimiento !== undefined) {
             updates.fechaVencimiento = ensureUtcDate(updates.fechaVencimiento);
-            console.log('Fecha de Vencimiento PARSEADA (toISOString - PUT):', updates.fechaVencimiento?.toISOString());
         }
 
         const updatedCard = await Card.findOneAndUpdate(
@@ -114,15 +128,19 @@ router.put('/:id', async (req, res) => {
             { new: true, runValidators: true }
         );
 
-        console.log('Tarjeta actualizada exitosamente. Objeto retornado por Mongoose (Fechas en UTC):', updatedCard);
-
         if (!updatedCard) {
             return res.status(404).json({ message: 'Tarjeta no encontrada' });
         }
         res.status(200).json(updatedCard);
     } catch (err) {
         console.error("Error al actualizar tarjeta:", err);
-        res.status(400).json({ message: 'Error al actualizar tarjeta', error: err.message });
+        res.status(400).json({ 
+            message: 'Error al actualizar tarjeta', 
+            error: err.message,
+            ...(err.message.includes('El miembro debe ser') && { 
+                miembrosPermitidos: MIEMBROS_PERMITIDOS 
+            })
+        });
     }
 });
 

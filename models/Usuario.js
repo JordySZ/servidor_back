@@ -6,7 +6,7 @@ const UsuarioSchema = new mongoose.Schema({
     apellido: { type: String, required: true },
     correo: { type: String, required: true, unique: true },
     contraseña: { type: String, required: true },
-    rol: { type: String, enum: ['Gerencia', 'Usuario', 'Supervisor'], required: true },
+    rol: { type: String, enum: ['SWT', 'Cont', 'Supervisor','A.R','CX','SIR','SD','Op'], required: true },
     ciudad: {
         type: String,
         enum: ['Quito', 'Calderón', 'Tumbaco', 'Pomasqui', 'Centro Historico'],

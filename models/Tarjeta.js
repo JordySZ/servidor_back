@@ -4,7 +4,11 @@ const mongoose = require('mongoose');
 const cardSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   titulo: { type: String, default: '' },
-  miembro: { type: String, default: '' },
+  miembro: {
+    type: String,
+    enum: ['DSI', 'Infraestructura', 'Contabilidad', 'Operaciones', 'Redes', 'Trade', 'DragonTaill'],
+    default: ''
+  },
   fechaInicio: { type: Date, default: null },
   fechaVencimiento: { type: Date, default: null },
   estado: {

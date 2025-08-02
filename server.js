@@ -10,6 +10,7 @@ const cors = require('cors');
 // --- Importaciones de esquemas (NO modelos directamente aquí) y rutas ---
 const ProcessSchemaInfo = require('./models/Process'); // Importa el objeto { schema, modelName }
 const UsuarioRoutesFactory = require('./routes/usuarioRoutes'); // Importa la función que crea las rutas de usuario
+const SolicitudAperturaSchemaInfo = require('./models/Solicitud');
 
 const app = express(); // <-- ¡ESTA LÍNEA DEBE ESTAR AQUÍ!
 const PORT = process.env.PORT || 3000;
@@ -43,6 +44,105 @@ connUsers.on('error', (err) => console.error('❌ BACKEND ERROR: Error de conexi
 
 // --- Rutas específicas para usuarios ---
 // Se colocan aquí porque dependen de 'app' y 'connUsers', que ya están definidos.
+
+const connSolicitudes = mongoose.createConnection(process.env.MONGODB_URL_SOLECUTIO, {
+    // useNewUrlParser y useUnifiedTopology están deprecated en Mongoose 6+
+});
+
+connSolicitudes.on('connected', () => console.log('✅ BACKEND DEBUG: Conectado a MongoDB Atlas (DB: Solicitudes)'));
+connSolicitudes.on('error', (err) => console.error('❌ BACKEND ERROR: Error de conexión a MongoDB (DB: Solicitudes):', err));
+
+// --- Crear modelo de SolicitudApertura ---
+const SolicitudApertura = connSolicitudes.model(
+    SolicitudAperturaSchemaInfo.modelName, 
+    SolicitudAperturaSchemaInfo.schema
+);
+app.use('/solicitudes', (req, res, next) => {
+    // Middleware para adjuntar el modelo de solicitudes
+    req.SolicitudModel = SolicitudApertura;
+    next();
+});
+
+// POST: Crear nueva solicitud
+app.post('/solicitudes', async (req, res) => {
+    try {
+        console.log('✅ BACKEND DEBUG: Recibida petición POST /solicitudes');
+        const nuevaSolicitud = new req.SolicitudModel(req.body);
+        await nuevaSolicitud.save();
+        console.log('✅ BACKEND DEBUG: Solicitud creada exitosamente');
+        res.status(201).json(nuevaSolicitud);
+    } catch (error) {
+        console.error('❌ BACKEND ERROR: Error al crear solicitud:', error);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// GET: Obtener todas las solicitudes
+app.get('/solicitudes', async (req, res) => {
+    try {
+        console.log('✅ BACKEND DEBUG: Recibida petición GET /solicitudes');
+        const solicitudes = await req.SolicitudModel.find();
+        console.log(`✅ BACKEND DEBUG: Solicitudes encontradas: ${solicitudes.length}`);
+        res.json(solicitudes);
+    } catch (error) {
+        console.error('❌ BACKEND ERROR: Error al obtener solicitudes:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET: Obtener una solicitud por ID
+app.get('/solicitudes/:id', async (req, res) => {
+    try {
+        console.log(`✅ BACKEND DEBUG: Recibida petición GET /solicitudes/${req.params.id}`);
+        const solicitud = await req.SolicitudModel.findById(req.params.id);
+        if (!solicitud) {
+            console.log('⚠️ BACKEND DEBUG: Solicitud no encontrada');
+            return res.status(404).json({ error: 'Solicitud no encontrada' });
+        }
+        res.json(solicitud);
+    } catch (error) {
+        console.error('❌ BACKEND ERROR: Error al obtener solicitud:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// PATCH: Actualizar estado de una solicitud
+app.patch('/solicitudes/:id', async (req, res) => {
+    try {
+        console.log(`✅ BACKEND DEBUG: Recibida petición PATCH /solicitudes/${req.params.id}`);
+        const solicitud = await req.SolicitudModel.findByIdAndUpdate(
+            req.params.id,
+            { estado: req.body.estado },
+            { new: true, runValidators: true }
+        );
+        if (!solicitud) {
+            console.log('⚠️ BACKEND DEBUG: Solicitud no encontrada para actualizar');
+            return res.status(404).json({ error: 'Solicitud no encontrada' });
+        }
+        console.log('✅ BACKEND DEBUG: Estado de solicitud actualizado exitosamente');
+        res.json(solicitud);
+    } catch (error) {
+        console.error('❌ BACKEND ERROR: Error al actualizar solicitud:', error);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// DELETE: Eliminar una solicitud
+app.delete('/solicitudes/:id', async (req, res) => {
+    try {
+        console.log(`✅ BACKEND DEBUG: Recibida petición DELETE /solicitudes/${req.params.id}`);
+        const solicitud = await req.SolicitudModel.findByIdAndDelete(req.params.id);
+        if (!solicitud) {
+            console.log('⚠️ BACKEND DEBUG: Solicitud no encontrada para eliminar');
+            return res.status(404).json({ error: 'Solicitud no encontrada' });
+        }
+        console.log('✅ BACKEND DEBUG: Solicitud eliminada exitosamente');
+        res.json({ message: 'Solicitud eliminada correctamente' });
+    } catch (error) {
+        console.error('❌ BACKEND ERROR: Error al eliminar solicitud:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 app.use('/usuarios', UsuarioRoutesFactory(connUsers));
 
 
