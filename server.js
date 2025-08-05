@@ -6,7 +6,8 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
+const multer = require('multer');
+const upload = multer(); // Configuración básica (sin almacenamiento en disco)
 // --- Importaciones de esquemas (NO modelos directamente aquí) y rutas ---
 const ProcessSchemaInfo = require('./models/Process'); // Importa el objeto { schema, modelName }
 const UsuarioRoutesFactory = require('./routes/usuarioRoutes'); // Importa la función que crea las rutas de usuario
@@ -64,19 +65,69 @@ app.use('/solicitudes', (req, res, next) => {
 });
 
 // POST: Crear nueva solicitud
-app.post('/solicitudes', async (req, res) => {
+app.post('/solicitudes', upload.single('archivo'), async (req, res) => {
     try {
-        console.log('✅ BACKEND DEBUG: Recibida petición POST /solicitudes');
-        const nuevaSolicitud = new req.SolicitudModel(req.body);
+        console.log('✅ BACKEND DEBUG: Datos recibidos:', {
+            body: req.body,      // Campos de texto
+            file: req.file       // Archivo subido (si existe)
+        });
+
+        // Validación manual de campos obligatorios
+        const { nombreTienda, direccion, justificacion } = req.body;
+        if (!nombreTienda || !direccion || !justificacion) {
+            return res.status(400).json({ 
+                error: "Faltan campos obligatorios",
+                detalles: {
+                    nombreTienda: !nombreTienda ? "Campo requerido" : null,
+                    direccion: !direccion ? "Campo requerido" : null,
+                    justificacion: !justificacion ? "Campo requerido" : null
+                }
+            });
+        }
+
+        // Crear la solicitud en la base de datos
+        const nuevaSolicitud = new SolicitudApertura({
+            nombreTienda,
+            direccion,
+            justificacion,
+            estado: 'pendiente',
+            archivo: req.file ? {
+                data: req.file.buffer,       // Buffer del archivo
+                contentType: req.file.mimetype,
+                nombreOriginal: req.file.originalname
+            } : null
+        });
+
         await nuevaSolicitud.save();
-        console.log('✅ BACKEND DEBUG: Solicitud creada exitosamente');
         res.status(201).json(nuevaSolicitud);
     } catch (error) {
-        console.error('❌ BACKEND ERROR: Error al crear solicitud:', error);
-        res.status(400).json({ error: error.message });
+        console.error('❌ BACKEND ERROR:', error);
+        res.status(400).json({ 
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
+app.get('/solicitudes/:id/archivo', async (req, res) => {
+  try {
+    const solicitud = await SolicitudApertura.findById(req.params.id);
+    
+    if (!solicitud || !solicitud.archivo || !solicitud.archivo.data) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
 
+    res.set({
+      'Content-Type': solicitud.archivo.contentType,
+      'Content-Disposition': `attachment; filename=${solicitud.archivo.nombreOriginal || 'documento'}`,
+      'Content-Length': solicitud.archivo.data.length
+    });
+
+    res.send(solicitud.archivo.data);
+  } catch (error) {
+    console.error('Error al descargar archivo:', error);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
 // GET: Obtener todas las solicitudes
 app.get('/solicitudes', async (req, res) => {
     try {

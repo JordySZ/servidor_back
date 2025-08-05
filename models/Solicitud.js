@@ -24,6 +24,11 @@ const solicitudAperturaSchema = new mongoose.Schema({
     fechaCreacion: {
         type: Date,
         default: Date.now
+    },
+    archivo: {  // Nuevo campo para el archivo
+        data: Buffer,        // Almacena el contenido del archivo
+        contentType: String, // Tipo MIME (ej: 'application/pdf')
+        nombreOriginal: String // Nombre original del archivo (opcional)
     }
 });
 
